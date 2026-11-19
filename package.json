@@ -41,6 +41,7 @@
     "@types/pg": "^8.23.1",
     "@types/react": "~19.3.0",
     "babel-preset-expo": "~58.0.26",
+    "esbuild": "^0.28.2",
     "pg": "^8.23.1",
     "typescript": "~6.0.3",
     "vite": "^8.3.8",
@@ -55,7 +56,8 @@
     "typecheck": "tsc --noEmit",
     "import:ciqual": "node scripts/import-ciqual.mjs",
     "pg:test:start": "bash supabase/tests/pg-harness.sh start",
-    "pg:test:stop": "bash supabase/tests/pg-harness.sh stop"
+    "pg:test:stop": "bash supabase/tests/pg-harness.sh stop",
+    "build:web": "node web/build.mjs"
   },
   "private": true
 }
