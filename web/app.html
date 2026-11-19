@@ -3,6 +3,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Primal Scan">
+<!--__PWA__-->
 <style>
 /* Mise en page : une colonne mobile, navigation basse, fiche aliment en panneau plein écran. Palette vert forêt / beige, mode sombre uniquement. */
 :root {
@@ -14,6 +15,7 @@
   color-scheme: dark;
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+[hidden] { display: none !important; }
 html, body { background: var(--bg); }
 body { color: var(--cream); font-family: var(--font); font-size: 15px; line-height: 1.4; margin: 0;
   padding-block: 0 96px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
@@ -67,17 +69,24 @@ nav button.on { color: var(--green-soft); } nav svg { width: 22px; height: 22px;
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .top { position: sticky; top: 0; background: var(--bg); padding-block: 8px; z-index: 5; }
 .tiny { font-size: 12px; color: var(--soft); }
+#scan { position: fixed; inset: 0; z-index: 60; background: #000; display: flex; flex-direction: column; }
+#scan video { flex: 1; width: 100%; object-fit: cover; min-height: 0; }
+#scan .bot { background: var(--bg); padding: 16px max(16px, env(safe-area-inset-right, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); display: flex; flex-direction: column; gap: 10px; }
+#scan .frame { position: absolute; left: 50%; top: 38%; width: min(78vw, 320px); height: 170px; transform: translate(-50%, -50%); border: 2px solid var(--green-soft); border-radius: 24px; pointer-events: none; box-shadow: 0 0 0 100vmax rgba(0,0,0,.35); }
+img.pic { width: 84px; height: 84px; border-radius: 20px; object-fit: cover; background: var(--surface2); flex: none; }
 </style>
 
 <main id="app"></main>
 <nav id="nav"></nav>
 <div id="sheet" hidden></div>
+<div id="scan" hidden></div>
 
 <script>/*__BUNDLE__*/</script>
 <script>
 (function () {
 'use strict';
 var P = PS;
+var ONLINE = /*__ONLINE__*/false;
 
 /* ---------- Données (stockées dans ce navigateur) ---------- */
 var KEY = 'primal.web.v1', mem = null;
@@ -86,6 +95,7 @@ function load() {
   return mem || null;
 }
 var db = load() || { entries: [], custom: [], goals: JSON.parse(JSON.stringify(P.DEFAULT_GOALS)), profile: null, primal: P.DEFAULT_PRIMAL_CONFIG };
+db.cache = db.cache || [];
 db.goals = Object.assign({}, P.DEFAULT_GOALS, db.goals); db.goals.micro = Object.assign({}, P.DEFAULT_GOALS.micro, db.goals.micro || {});
 function save() { mem = db; try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) {} }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
@@ -115,12 +125,14 @@ function animate() {
 }
 function items(list) { return list.map(function (e) { return { id: e.id, food: e.food, qty: e.qty }; }); }
 function dayEntries(d) { return db.entries.filter(function (e) { return e.date === d; }); }
-function allFoods() { return db.custom.concat(P.SEED_FOODS); }
+function allFoods() { return db.custom.concat(db.cache, P.SEED_FOODS); }
+function byBarcode(c) { return db.custom.concat(db.cache).find(function (f) { return f.barcode === c; }); }
+function remember(f) { if (f.source === 'off' && !db.cache.some(function (x) { return x.id === f.id; })) { db.cache.unshift(f); save(); } }
 
 /* ---------- État de l'interface ---------- */
 var today = key(new Date());
-var S = { tab: 'home', date: today, q: '', form: false, sheet: null, period: 7, answer: '', advice: null, backup: '', confirmReset: false };
-var $app = document.getElementById('app'), $nav = document.getElementById('nav'), $sheet = document.getElementById('sheet');
+var S = { tab: 'home', date: today, q: '', form: false, sheet: null, period: 7, answer: '', advice: null, backup: '', confirmReset: false, online: [], onlineQ: '', onlineBusy: false, bc: '', msg: null, formBarcode: '' };
+var $scan = document.getElementById('scan'), $app = document.getElementById('app'), $nav = document.getElementById('nav'), $sheet = document.getElementById('sheet');
 
 var ICON = {
   home: '<path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
@@ -167,16 +179,19 @@ function foodRow(f, act) {
 function viewAdd() {
   if (S.form) return viewForm();
   var q = norm(S.q), terms = q.split(' ').filter(Boolean);
-  var res = terms.length ? allFoods().filter(function (f) { var n = norm(f.name); return terms.every(function (t) { return n.indexOf(t) >= 0; }); }).slice(0, 40) : db.custom.concat(P.SEED_FOODS).slice(0, 12);
-  var h = '<h1>Ajouter</h1><input id="q" type="search" placeholder="Rechercher : pomme, saumon, lentilles…" value="' + esc(S.q) + '" autocomplete="off">';
-  h += '<div class="card" style="padding:8px 20px">' + (res.length ? res.map(function (f) { return foodRow(f, 'food'); }).join('') : '<div class="empty">Aucun résultat.<br>Créez l’aliment ci-dessous.</div>') + '</div>';
+  var res = terms.length ? allFoods().filter(function (f) { var n = norm(f.name + ' ' + (f.brand || '')); return terms.every(function (t) { return n.indexOf(t) >= 0; }); }).slice(0, 40) : db.custom.concat(db.cache, P.SEED_FOODS).slice(0, 12);
+  var h = '<h1>Ajouter</h1>';
+  if (ONLINE) h += '<button data-act="scan" style="min-height:56px">Scanner un code-barres</button><div class="row"><input id="bc" inputmode="numeric" placeholder="ou saisir le code-barres" value="' + esc(S.bc) + '"><button class="sec small" data-act="barcode">Chercher</button></div>' + (S.msg ? '<div class="notice ' + (S.msg.kind || '') + '">' + esc(S.msg.text) + (S.msg.create ? '<div style="margin-top:8px"><button class="small" data-act="form" data-v="' + esc(S.msg.create) + '">Créer ce produit</button></div>' : '') + '</div>' : '');
+  h += '<input id="q" type="search" placeholder="Rechercher : pomme, yaourt nature carrefour…" value="' + esc(S.q) + '" autocomplete="off">';
+  h += '<div class="card" style="padding:8px 20px"><div class="label" style="padding-top:10px">Sur cet appareil</div>' + (res.length ? res.map(function (f) { return foodRow(f, 'food'); }).join('') : '<div class="empty">Aucun résultat local.</div>') + '</div>';
+  if (ONLINE && terms.length) h += '<div class="card" style="padding:8px 20px"><div class="label" style="padding-top:10px">En ligne · Open Food Facts</div>' + (S.onlineBusy ? '<div class="empty">Recherche…</div>' : S.online.length ? S.online.map(function (f) { return foodRow(f, 'food'); }).join('') : (S.q.trim().length < 3 ? '<div class="empty">Tapez au moins 3 lettres.</div>' : '<div class="empty">Aucun produit trouvé en ligne (ou pas de connexion).</div>')) + '</div>';
   h += '<button class="sec" data-act="form">Créer un aliment / un produit</button>';
-  h += '<div class="notice warn">Cette version HTML n’a pas accès à Internet ni à la caméra : pas de scan de code-barres ni de base Open Food Facts. Les ~30 aliments de départ ont des valeurs <b>indicatives</b> ; pour un produit emballé, recopiez sa liste d’ingrédients et ses valeurs (laissez vide ce que vous ne savez pas : rien n’est inventé).</div>';
+  if (!ONLINE) h += '<div class="notice warn">Cette version n’a pas accès à Internet ni à la caméra : pas de scan ni de base Open Food Facts. Utilisez la version hébergée pour scanner.</div>';
   return h;
 }
 var MAIN_FIELDS = [['kcal', 'Énergie (kcal)'], ['protein', 'Protéines (g)'], ['carbs', 'Glucides (g)'], ['fat', 'Lipides (g)'], ['fiber', 'Fibres (g)'], ['satFat', 'dont saturés (g)'], ['sugars', 'Sucres (g)'], ['salt', 'Sel (g)']];
 function viewForm() {
-  var h = '<div class="row between"><h1>Nouvel aliment</h1><button class="ghost small" data-act="formx">Annuler</button></div>';
+  var h = (S.formBarcode ? '<div class="notice">Code-barres : ' + esc(S.formBarcode) + '</div>' : '') + '<div class="row between"><h1>Nouvel aliment</h1><button class="ghost small" data-act="formx">Annuler</button></div>';
   h += '<div class="card"><label>Nom<input id="f_name"></label><label>Liste d’ingrédients (facultatif, recopiée de l’emballage)<textarea id="f_ing" placeholder="Sucre, huile de palme, noisettes 13 %, …"></textarea></label><label>Valeurs données pour<select id="f_basis"><option value="g">100 g</option><option value="ml">100 ml</option></select></label><label>Poids d’une portion (facultatif)<input id="f_portion" inputmode="decimal"></label></div>';
   h += '<div class="card"><div class="label">Valeurs nutritionnelles (vide = donnée absente)</div><div class="grid2">' + MAIN_FIELDS.map(function (f) { return '<label class="tiny">' + f[1] + '<input data-n="' + f[0] + '" inputmode="decimal"></label>'; }).join('') + '</div></div>';
   h += '<details class="card"><summary>Vitamines et minéraux (facultatif)</summary><div class="grid2" style="margin-top:12px">' + P.NUTRIENTS.filter(function (n) { return n.group === 'vitamin' || n.group === 'mineral'; }).map(function (n) { return '<label class="tiny">' + esc(n.label) + ' (' + n.unit + ')<input data-n="' + n.key + '" inputmode="decimal"></label>'; }).join('') + '</div></details>';
@@ -238,7 +253,7 @@ function renderSheet() {
   var f = sh.food, r = P.scoreFood(f, db.primal), mic = P.scoreMicroFood(f, db.goals.micro), an = P.analyzeFood(f, db.primal), n = f.nutrients, q = sh.edit ? sh.edit.qty : null;
   var unknown = an.ingredients.filter(function (i) { return i.cls === 'unknown'; }).map(function (i) { return i.name; });
   var h = '<div><div class="row between"><button class="ghost small" data-act="closesheet">‹ Retour</button><span></span></div>';
-  h += '<div class="card"><h2 style="font-size:22px">' + esc(f.name) + '</h2><div class="row wrap">' + (f.approximate ? '<span class="badge" style="color:var(--warn)">Valeurs indicatives</span>' : '') + (f.source === 'custom' ? '<span class="badge" style="color:var(--green-soft)">Personnalisé</span>' : '') + '</div></div>';
+  h += '<div class="card"><div class="row">' + (f.imageUrl ? '<img class="pic" src="' + esc(f.imageUrl) + '" alt="">' : '') + '<div class="grow"><h2 style="font-size:22px">' + esc(f.name) + '</h2>' + (f.brand ? '<div class="tiny">' + esc(f.brand) + '</div>' : '') + '</div></div><div class="row wrap">' + (f.source === 'off' ? '<span class="badge" style="color:var(--green-soft)">Open Food Facts</span>' : '') + (f.novaGroup ? '<span class="badge" style="color:var(--beige)">NOVA ' + f.novaGroup + '</span>' : '') + '' + (f.approximate ? '<span class="badge" style="color:var(--warn)">Valeurs indicatives</span>' : '') + (f.source === 'custom' ? '<span class="badge" style="color:var(--green-soft)">Personnalisé</span>' : '') + '</div></div>';
   h += '<div class="two"><div class="card"><div class="label">Note Primal</div>' + ring(r ? r.total : null, 100) + '<div class="tiny">' + (r ? r.label : '') + (r && r.max - r.min > 1 ? '<br>entre ' + Math.round(r.min) + ' et ' + Math.round(r.max) + ' (ingrédients inconnus)' : '') + '</div></div><div class="card"><div class="label">Micro</div>' + ring(mic.score, 100, 'var(--beige)') + '<div class="tiny">' + (mic.score == null ? 'Données absentes' : Math.round(mic.coverage * 100) + ' % des données') + '</div></div></div>';
   h += '<div class="card"><div class="label">Pour 100 ' + f.basis + '</div><div class="row between"><div style="font-size:32px;font-weight:700" class="num">' + (n.kcal == null ? '—' : fmt(n.kcal)) + ' <span class="tiny">kcal</span></div><div class="tiny">' + (n.kcal == null ? 'énergie inconnue' : pct(P.percentOfDailyGoal(n.kcal, db.goals.kcal)) + ' de l’objectif journalier') + '</div></div>' +
     [['Protéines', 'protein'], ['Glucides', 'carbs'], ['Lipides', 'fat'], ['Fibres', 'fiber'], ['dont saturés', 'satFat'], ['dont mono-insaturés', 'monoFat'], ['dont polyinsaturés', 'polyFat']].map(function (x) { return '<div class="row between"><span class="' + (x[0].indexOf('dont') === 0 ? 'tiny' : '') + '">' + x[0] + '</span><span class="num">' + (n[x[1]] == null ? '<span class="tiny">donnée absente</span>' : fmt(n[x[1]], 1) + ' g') + '</span></div>'; }).join('') + '</div>';
@@ -268,6 +283,51 @@ function preview() {
   catch (e) { el.textContent = e.message; }
 }
 
+/* ---------- Scan & recherche en ligne (version hébergée) ---------- */
+var searchTimer = null;
+function onlineSearch() {
+  if (!ONLINE) return;
+  clearTimeout(searchTimer);
+  var q = S.q.trim();
+  if (q.length < 3) { S.online = []; S.onlineBusy = false; return; }
+  S.onlineBusy = true;
+  searchTimer = setTimeout(function () {
+    P.searchOff(q, 20).then(function (r) { if (S.q.trim() !== q) return; S.online = r; S.onlineBusy = false; if (S.tab === 'add' && !S.form && !S.sheet) { S.keep = true; var el = document.activeElement, pos = el && el.selectionStart, id = el && el.id; render(); if (id === 'q') { var n = document.getElementById('q'); n.focus(); n.setSelectionRange(pos, pos); } } });
+  }, 450);
+}
+function lookup(raw) {
+  var code = P.normalizeGtin(String(raw).replace(/\D/g, ''));
+  if (!P.isValidGtin(code)) { S.msg = { kind: 'warn', text: 'Code-barres invalide (clé de contrôle incorrecte). Vérifiez les chiffres.' }; return Promise.resolve(false); }
+  var known = byBarcode(code);
+  if (known) { openSheet(known); return Promise.resolve(true); }
+  S.msg = { text: 'Recherche du produit ' + code + '…' }; render();
+  return P.fetchByBarcode(code).then(function (r) {
+    if (r.kind === 'found') { remember(r.food); S.msg = null; openSheet(r.food); return true; }
+    S.msg = r.kind === 'offline' ? { kind: 'warn', text: 'Pas de connexion : produit inconnu sur cet appareil. Vous pouvez le créer à la main.', create: code } : { kind: 'warn', text: 'Produit ' + code + ' absent d’Open Food Facts. Créez-le avec les infos de l’emballage (rien n’est inventé).', create: code };
+    return false;
+  });
+}
+var reader = null;
+function stopScan() { try { if (reader) reader.reset(); } catch (e) {} reader = null; $scan.hidden = true; $scan.innerHTML = ''; }
+function startScan() {
+  $scan.hidden = false;
+  $scan.innerHTML = '<video id="vid" playsinline muted autoplay></video><div class="frame"></div><div class="bot"><div id="scanmsg" class="tiny" style="text-align:center">Placez le code-barres dans le cadre</div><button class="ghost" data-act="scanx">Fermer</button></div>';
+  var msg = document.getElementById('scanmsg'), done = false;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { msg.textContent = 'Caméra indisponible dans ce navigateur : saisissez le code à la main.'; return; }
+  var Z = PS.ZXing, hints = new Map();
+  hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.EAN_13, Z.BarcodeFormat.EAN_8, Z.BarcodeFormat.UPC_A, Z.BarcodeFormat.UPC_E, Z.BarcodeFormat.QR_CODE]);
+  hints.set(Z.DecodeHintType.TRY_HARDER, true);
+  reader = new Z.BrowserMultiFormatReader(hints, 300);
+  reader.decodeFromConstraints({ video: { facingMode: { ideal: 'environment' } }, audio: false }, 'vid', function (res) {
+    if (!res || done) return;
+    var text = res.getText(), code = res.getBarcodeFormat() === Z.BarcodeFormat.QR_CODE ? P.barcodeFromQr(text) : text;
+    if (!code || !P.isValidGtin(P.normalizeGtin(code))) { msg.textContent = 'Code non reconnu comme produit, réessayez.'; return; }
+    done = true; if (navigator.vibrate) navigator.vibrate(60);
+    msg.textContent = 'Code ' + code + ' lu, recherche…';
+    lookup(code).then(function () { stopScan(); render(); });
+  }).catch(function (err) { msg.textContent = 'Impossible d’accéder à la caméra (' + (err && err.name ? err.name : 'erreur') + '). Autorisez-la dans Réglages ▸ Safari, ou saisissez le code.'; });
+}
+
 /* ---------- Rendu & événements ---------- */
 function render() {
   renderNav();
@@ -276,10 +336,11 @@ function render() {
   if (S.keep) { window.scrollTo(0, y); S.keep = false; }
 }
 function numOrNull(s) { var n = parseFloat(String(s).replace(',', '.')); return isFinite(n) && n >= 0 ? n : null; }
-function findFood(id) { var hist = db.entries.find(function (x) { return x.food.id === id; }); return allFoods().find(function (f) { return f.id === id; }) || (hist ? hist.food : null) || (S.sheet && S.sheet.food.id === id ? S.sheet.food : null); }
+function findFood(id) { var onl = S.online.find(function (x) { return x.id === id; }); var hist = db.entries.find(function (x) { return x.food.id === id; }); return allFoods().find(function (f) { return f.id === id; }) || onl || (hist ? hist.food : null) || (S.sheet && S.sheet.food.id === id ? S.sheet.food : null); }
 
 document.addEventListener('input', function (e) {
-  if (e.target.id === 'q') { S.q = e.target.value; var pos = e.target.selectionStart; S.keep = true; render(); var q = document.getElementById('q'); if (q) { q.focus(); q.setSelectionRange(pos, pos); } }
+  if (e.target.id === 'bc') { S.bc = e.target.value; return; }
+  if (e.target.id === 'q') { S.q = e.target.value; onlineSearch(); var pos = e.target.selectionStart; S.keep = true; render(); var q = document.getElementById('q'); if (q) { q.focus(); q.setSelectionRange(pos, pos); } }
   if (e.target.closest && e.target.closest('#sheet')) preview();
 });
 document.addEventListener('change', function (e) { if (e.target.closest && e.target.closest('#sheet')) preview(); });
@@ -291,19 +352,22 @@ document.addEventListener('click', function (e) {
     case 'day': S.date = addDays(S.date, Number(v)); break;
     case 'daytoday': S.date = today; break;
     case 'period': S.period = Number(v); break;
-    case 'form': S.form = true; break;
-    case 'formx': S.form = false; break;
+    case 'form': S.form = true; S.formBarcode = v || ''; break;
+    case 'formx': S.form = false; S.formBarcode = ''; break;
     case 'food': var f = findFood(id); if (f) { S.addMeal = null; openSheet(f); } return;
     case 'addto': S.addMeal = v; S.tab = 'add'; S.form = false; break;
     case 'edit': var en = db.entries.find(function (x) { return x.id === id; }); if (en) openSheet(en.food, en); return;
     case 'del': db.entries = db.entries.filter(function (x) { return x.id !== id; }); save(); break;
+    case 'scan': startScan(); return;
+    case 'scanx': stopScan(); return;
+    case 'barcode': lookup(S.bc).then(function () { render(); }); return;
     case 'closesheet': S.sheet = null; renderSheet(); return;
     case 'savesheet': {
       var q = readQty(); if (!(q.amount > 0)) return;
       try { P.nutrientsFor(S.sheet.food, q); } catch (err) { document.getElementById('s_prev').textContent = err.message; return; }
       var meal = document.getElementById('s_meal').value, date = document.getElementById('s_date').value || today;
       if (S.sheet.edit) { var t = db.entries.find(function (x) { return x.id === S.sheet.edit.id; }); if (t) { t.qty = q; t.meal = meal; t.date = date; } }
-      else db.entries.push({ id: uid(), date: date, meal: meal, food: S.sheet.food, qty: q });
+      else { db.entries.push({ id: uid(), date: date, meal: meal, food: S.sheet.food, qty: q }); remember(S.sheet.food); }
       save(); S.sheet = null; renderSheet(); S.date = date; S.tab = 'journal'; break;
     }
     case 'delfood': db.custom = db.custom.filter(function (x) { return x.id !== S.sheet.food.id; }); save(); S.sheet = null; renderSheet(); break;
@@ -311,8 +375,8 @@ document.addEventListener('click', function (e) {
       var name = document.getElementById('f_name').value.trim(); if (name.length < 2) { document.getElementById('f_name').focus(); return; }
       var nut = {}; document.querySelectorAll('[data-n]').forEach(function (i) { var x = numOrNull(i.value); if (x != null) nut[i.dataset.n] = x; });
       var ing = document.getElementById('f_ing').value.trim(), por = numOrNull(document.getElementById('f_portion').value);
-      var food = { id: 'custom:' + uid(), name: name, source: 'custom', nutrients: nut, basis: document.getElementById('f_basis').value, ingredientsText: ing || undefined, portionSize: por && por > 0 ? por : undefined };
-      db.custom.unshift(food); save(); S.form = false; S.q = ''; render(); openSheet(food); return;
+      var food = { id: 'custom:' + uid(), name: name, source: 'custom', barcode: S.formBarcode || undefined, nutrients: nut, basis: document.getElementById('f_basis').value, ingredientsText: ing || undefined, portionSize: por && por > 0 ? por : undefined };
+      db.custom.unshift(food); save(); S.form = false; S.formBarcode = ''; S.q = ''; render(); openSheet(food); return;
     }
     case 'savegoals': document.querySelectorAll('[data-goal]').forEach(function (i) { var x = numOrNull(i.value); if (x != null) db.goals[i.dataset.goal] = x; }); save(); b.textContent = 'Enregistré ✓'; return;
     case 'suggest': {

@@ -8,3 +8,7 @@ export { NUTRIENTS, NUTRIENT_BY_KEY, VITAMINS, MINERALS } from '../src/engines/n
 export { CLASS_INFO } from '../src/engines/primal/dictionary';
 export { SEED_FOODS } from '../src/data/seedFoods';
 export { answerLocally } from '../src/engines/assistant';
+export { fetchByBarcode, searchOff } from '../src/data/off';
+export { isValidGtin, normalizeGtin, barcodeFromQr } from '../src/data/barcode';
+import * as ZXing from '@zxing/library';
+export { ZXing };
