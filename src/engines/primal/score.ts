@@ -74,6 +74,12 @@ export function analyzeFood(food: Food, cfg: PrimalConfig = DEFAULT_PRIMAL_CONFI
     const seen = new Set(additives.map((a) => a.code));
     for (const a of extra) if (!seen.has(a.code)) additives.push(a);
   }
+  // arômes / ingrédients industriels sans code E : pénalité "technologique" légère (une fois par ingrédient)
+  for (const ing of ingredients) {
+    if ((ing.cls === 'flavouring' || ing.cls === 'industrial') && !/^e ?\d/i.test(ing.name.trim()) && detectAdditives(ing.name).length === 0) {
+      additives.push({ code: 'ing:' + ing.name.toLowerCase(), name: ing.name, category: 'autre', risk: 1 });
+    }
+  }
   // édulcorants cités en ingrédient mais sans code E
   for (const ing of ingredients) {
     if (ing.cls === 'sweetener' && !additives.some((a) => a.category === 'édulcorant')) {
