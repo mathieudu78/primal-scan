@@ -3,7 +3,7 @@ import type { NutrientKey } from './nutrients';
 /** Valeurs par 100 g (ou 100 ml). `undefined` = donnée ABSENTE ; `0` = vraie valeur nulle. */
 export type NutrientMap = Partial<Record<NutrientKey, number>>;
 
-export type FoodSource = 'off' | 'ciqual' | 'custom' | 'recipe';
+export type FoodSource = 'off' | 'ciqual' | 'seed' | 'custom' | 'recipe';
 export type Unit = 'g' | 'ml' | 'portion';
 export type FoodState = 'raw' | 'cooked';
 export type MealType = 'breakfast' | 'lunch' | 'snack' | 'dinner' | 'other';
@@ -33,6 +33,8 @@ export interface Food {
   nutrientState?: FoodState;
   /** poids cuit / poids cru (ex. riz ≈ 2.5). Permet de convertir cru <-> cuit. */
   cookedYield?: number;
+  /** valeurs indicatives (liste de démarrage) : à remplacer par la base officielle CIQUAL */
+  approximate?: boolean;
   updatedAt?: number;
 }
 

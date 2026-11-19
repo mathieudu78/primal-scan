@@ -5,6 +5,7 @@
   "dependencies": {
     "@expo/vector-icons": "^15.1.1",
     "@react-native-async-storage/async-storage": "^2.2.0",
+    "@react-native-ml-kit/text-recognition": "^2.0.0",
     "@supabase/supabase-js": "^2.119.2",
     "expo": "~58.0.26",
     "expo-application": "~58.1.2",
@@ -39,6 +40,7 @@
   "devDependencies": {
     "@types/pg": "^8.23.1",
     "@types/react": "~19.3.0",
+    "babel-preset-expo": "~58.0.26",
     "pg": "^8.23.1",
     "typescript": "~6.0.3",
     "vite": "^8.3.8",
@@ -48,7 +50,12 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "import:ciqual": "node scripts/import-ciqual.mjs",
+    "pg:test:start": "bash supabase/tests/pg-harness.sh start",
+    "pg:test:stop": "bash supabase/tests/pg-harness.sh stop"
   },
   "private": true
 }

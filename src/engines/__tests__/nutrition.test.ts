@@ -86,3 +86,16 @@ describe('objectifs : proposition, jamais imposée', () => {
     expect(g.protein * 4 + g.carbs * 4 + g.fat * 9).toBeGreaterThan(g.kcal - 50);
   });
 });
+
+import { summarizeRecipe } from '../recipe';
+describe('recettes', () => {
+  it('totaux et par portion ; note Primal sur tous les ingrédients', () => {
+    const r = { servings: 4, items: [{ food: apple, qty: { amount: 400, unit: 'g' as const } }, { food: salmon, qty: { amount: 200, unit: 'g' as const } }] };
+    const s = summarizeRecipe(r, DEFAULT_GOALS);
+    expect(s.kcalTotal).toBeCloseTo(208 + 380, 5);
+    expect(s.kcalPerPortion).toBeCloseTo(147, 5);
+    expect(s.percentOfDayPerPortion).toBeCloseTo((147 / DEFAULT_GOALS.kcal) * 100, 5);
+    expect(s.primal!.total).toBeGreaterThan(85);
+    expect(summarizeRecipe({ servings: 1, items: [] }, DEFAULT_GOALS).primal).toBeNull();
+  });
+});

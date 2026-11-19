@@ -66,7 +66,7 @@ export function analyzeFood(food: Food, cfg: PrimalConfig = DEFAULT_PRIMAL_CONFI
       ? (byName !== 'unknown' ? byName : 'natural_fat')
       : (cat ?? byName);
     ingredients = [{ name: food.name, cls, share: 1, depth: 0 }];
-    known = cls !== 'unknown' && (food.source === 'ciqual' || food.source === 'custom' || !!food.category);
+    known = cls !== 'unknown' && (food.source === 'ciqual' || food.source === 'seed' || food.source === 'custom' || !!food.category);
   }
   // les additifs peuvent aussi venir d'Open Food Facts (tags) en plus du texte
   if (food.additivesTags?.length) {
