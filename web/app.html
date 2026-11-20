@@ -95,7 +95,7 @@ function load() {
   return mem || null;
 }
 var db = load() || { entries: [], custom: [], goals: JSON.parse(JSON.stringify(P.DEFAULT_GOALS)), profile: null, primal: P.DEFAULT_PRIMAL_CONFIG };
-db.cache = db.cache || [];
+db.cache = db.cache || []; if (db.usdaOn == null) db.usdaOn = true; db.usdaKey = db.usdaKey || 'DEMO_KEY';
 db.goals = Object.assign({}, P.DEFAULT_GOALS, db.goals); db.goals.micro = Object.assign({}, P.DEFAULT_GOALS.micro, db.goals.micro || {});
 function save() { mem = db; try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) {} }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
@@ -125,13 +125,15 @@ function animate() {
 }
 function items(list) { return list.map(function (e) { return { id: e.id, food: e.food, qty: e.qty }; }); }
 function dayEntries(d) { return db.entries.filter(function (e) { return e.date === d; }); }
-function allFoods() { return db.custom.concat(db.cache, P.SEED_FOODS); }
+var GKEY = 'primal.web.generic', GEN = [];
+try { GEN = JSON.parse(localStorage.getItem(GKEY) || '[]'); } catch (e) { GEN = []; }
+function allFoods() { return db.custom.concat(db.cache, GEN, GEN.length > 500 ? [] : P.SEED_FOODS); }
 function byBarcode(c) { return db.custom.concat(db.cache).find(function (f) { return f.barcode === c; }); }
-function remember(f) { if (f.source === 'off' && !db.cache.some(function (x) { return x.id === f.id; })) { db.cache.unshift(f); save(); } }
+function remember(f) { if ((f.source === 'off' || /^usda:/.test(f.id)) && !db.cache.some(function (x) { return x.id === f.id; })) { db.cache.unshift(f); save(); } }
 
 /* ---------- État de l'interface ---------- */
 var today = key(new Date());
-var S = { tab: 'home', date: today, q: '', form: false, sheet: null, period: 7, answer: '', advice: null, backup: '', confirmReset: false, online: [], onlineQ: '', onlineBusy: false, bc: '', msg: null, formBarcode: '' };
+var S = { tab: 'home', date: today, q: '', form: false, sheet: null, period: 7, answer: '', advice: null, backup: '', confirmReset: false, online: [], onlineQ: '', onlineBusy: false, usda: [], gmsg: '', bc: '', msg: null, formBarcode: '' };
 var $scan = document.getElementById('scan'), $app = document.getElementById('app'), $nav = document.getElementById('nav'), $sheet = document.getElementById('sheet');
 
 var ICON = {
@@ -185,6 +187,7 @@ function viewAdd() {
   h += '<input id="q" type="search" placeholder="Rechercher : pomme, yaourt nature carrefour…" value="' + esc(S.q) + '" autocomplete="off">';
   h += '<div class="card" style="padding:8px 20px"><div class="label" style="padding-top:10px">Sur cet appareil</div>' + (res.length ? res.map(function (f) { return foodRow(f, 'food'); }).join('') : '<div class="empty">Aucun résultat local.</div>') + '</div>';
   if (ONLINE && terms.length) h += '<div class="card" style="padding:8px 20px"><div class="label" style="padding-top:10px">En ligne · Open Food Facts</div>' + (S.onlineBusy ? '<div class="empty">Recherche…</div>' : S.online.length ? S.online.map(function (f) { return foodRow(f, 'food'); }).join('') : (S.q.trim().length < 3 ? '<div class="empty">Tapez au moins 3 lettres.</div>' : '<div class="empty">Aucun produit trouvé en ligne (ou pas de connexion).</div>')) + '</div>';
+  if (ONLINE && terms.length && db.usdaOn && S.usda.length) h += '<div class="card" style="padding:8px 20px"><div class="label" style="padding-top:10px">En ligne · USDA (aliments génériques, anglais)</div>' + S.usda.map(function (f) { return foodRow(f, 'food'); }).join('') + '</div>';
   h += '<button class="sec" data-act="form">Créer un aliment / un produit</button>';
   if (!ONLINE) h += '<div class="notice warn">Cette version n’a pas accès à Internet ni à la caméra : pas de scan ni de base Open Food Facts. Utilisez la version hébergée pour scanner.</div>';
   return h;
@@ -239,6 +242,7 @@ function viewSettings() {
   h += '<div class="card"><div class="label">Proposition automatique (facultative)</div><div class="grid2"><label class="tiny">Sexe<select id="p_sex"><option value="male"' + (pr.sex === 'male' ? ' selected' : '') + '>Homme</option><option value="female"' + (pr.sex === 'female' ? ' selected' : '') + '>Femme</option></select></label><label class="tiny">Âge<input id="p_age" inputmode="numeric" value="' + esc(pr.age) + '"></label><label class="tiny">Poids (kg)<input id="p_w" inputmode="decimal" value="' + esc(pr.weightKg) + '"></label><label class="tiny">Taille (cm)<input id="p_h" inputmode="decimal" value="' + esc(pr.heightCm) + '"></label></div><label class="tiny">Activité<select id="p_act">' + [['sedentary', 'Sédentaire'], ['light', 'Légère'], ['moderate', 'Modérée'], ['active', 'Active'], ['very_active', 'Très active']].map(function (a) { return '<option value="' + a[0] + '"' + (pr.activity === a[0] ? ' selected' : '') + '>' + a[1] + '</option>'; }).join('') + '</select></label><button class="sec" data-act="suggest">Calculer une proposition</button>';
   if (S.advice) h += '<div class="notice">Proposition (Mifflin-St Jeor) : ' + S.advice.kcal + ' kcal · ' + S.advice.protein + ' g protéines · ' + S.advice.carbs + ' g glucides · ' + S.advice.fat + ' g lipides · ' + S.advice.fiber + ' g fibres. Elle n’est appliquée que si vous le décidez.</div><button data-act="applyadvice">Appliquer cette proposition</button>';
   h += '</div>';
+  if (ONLINE) h += '<div class="card"><div class="label">Bases d’aliments</div><div class="row between"><span>CIQUAL (aliments bruts, officiel)</span><b class="num">' + (GEN.length ? fmt(GEN.length) + ' aliments' : 'non importée') + '</b></div><div class="tiny">Importez le fichier de la table CIQUAL (.xlsx, .xls ou .csv) téléchargé depuis ciqual.anses.fr ou data.gouv.fr (« Table de composition nutritionnelle des aliments Ciqual »). Il reste sur cet appareil.</div><input id="ciq_file" type="file" accept=".xlsx,.xls,.csv">' + (S.gmsg ? '<div class="notice">' + esc(S.gmsg) + '</div>' : '') + (GEN.length ? '<button class="ghost small" data-act="ciqdel">Retirer la base CIQUAL</button>' : '') + '<div class="row between"><span>USDA (génériques, en ligne)</span><button class="chip ' + (db.usdaOn ? 'on' : '') + '" data-act="usdatoggle">' + (db.usdaOn ? 'Activé' : 'Désactivé') + '</button></div><label class="tiny">Clé USDA (gratuite sur fdc.nal.usda.gov ; « DEMO_KEY » est très limitée)<input id="usda_key" value="' + esc(db.usdaKey) + '" autocapitalize="off" autocorrect="off"></label></div>';
   h += '<div class="card"><div class="label">Assistant local (sans IA)</div><div class="row"><input id="ask" placeholder="Ex. : Comment est calculée la note Primal ?"><button class="small" data-act="ask">OK</button></div><div class="row wrap">' + ['Comment est calculée la note Primal ?', 'Que signifie E471 ?', 'Explique la vitamine D', 'Résume ma journée'].map(function (q) { return '<button class="chip" data-act="askq" data-v="' + esc(q) + '">' + esc(q) + '</button>'; }).join('') + '</div>' + (S.answer ? '<div class="notice">' + esc(S.answer) + '</div>' : '') + '</div>';
   h += '<div class="card"><div class="label">Sauvegarde</div><div class="tiny">Vos données sont dans ce navigateur uniquement. Copiez la sauvegarde pour la conserver ou la restaurer ailleurs.</div><button class="sec" data-act="export">Afficher la sauvegarde</button><textarea id="backup" placeholder="Collez ici une sauvegarde pour la restaurer">' + esc(S.backup) + '</textarea><div class="row wrap"><button class="sec small" data-act="copy">Copier</button><button class="sec small" data-act="import">Restaurer</button></div>' + (S.confirmReset ? '<div class="notice bad">Tout effacer ? Cette action est définitive.</div><div class="row"><button class="danger small" data-act="reset2">Oui, tout effacer</button><button class="ghost small" data-act="reset0">Annuler</button></div>' : '<button class="ghost small" data-act="reset1">Effacer toutes les données</button>') + '</div>';
   h += '<div class="tiny" style="text-align:center">Primal Scan · usage personnel, sans compte · aucun conseil nutritionnel</div>';
@@ -289,10 +293,10 @@ function onlineSearch() {
   if (!ONLINE) return;
   clearTimeout(searchTimer);
   var q = S.q.trim();
-  if (q.length < 3) { S.online = []; S.onlineBusy = false; return; }
+  if (q.length < 3) { S.online = []; S.usda = []; S.onlineBusy = false; return; }
   S.onlineBusy = true;
   searchTimer = setTimeout(function () {
-    P.searchOff(q, 20).then(function (r) { if (S.q.trim() !== q) return; S.online = r; S.onlineBusy = false; if (S.tab === 'add' && !S.form && !S.sheet) { S.keep = true; var el = document.activeElement, pos = el && el.selectionStart, id = el && el.id; render(); if (id === 'q') { var n = document.getElementById('q'); n.focus(); n.setSelectionRange(pos, pos); } } });
+    Promise.all([P.searchOff(q, 25), db.usdaOn ? P.searchUsda(q, db.usdaKey, 15) : Promise.resolve([])]).then(function (rr) { if (S.q.trim() !== q) return; S.online = rr[0]; S.usda = rr[1]; S.onlineBusy = false; if (S.tab === 'add' && !S.form && !S.sheet) { S.keep = true; var el = document.activeElement, pos = el && el.selectionStart, id = el && el.id; render(); if (id === 'q') { var n = document.getElementById('q'); n.focus(); n.setSelectionRange(pos, pos); } } });
   }, 450);
 }
 function lookup(raw) {
@@ -328,6 +332,29 @@ function startScan() {
   }).catch(function (err) { msg.textContent = 'Impossible d’accéder à la caméra (' + (err && err.name ? err.name : 'erreur') + '). Autorisez-la dans Réglages ▸ Safari, ou saisissez le code.'; });
 }
 
+function importCiqual(file) {
+  S.gmsg = 'Lecture du fichier…'; render();
+  var fr = new FileReader();
+  fr.onerror = function () { S.gmsg = 'Lecture impossible.'; render(); };
+  fr.onload = function () {
+    try {
+      var rows;
+      if (/\.csv$/i.test(file.name)) rows = P.csvToRows(new TextDecoder('utf-8').decode(fr.result));
+      else {
+        var wb = P.XLSX.read(fr.result, { type: 'array' }), found = null;
+        wb.SheetNames.forEach(function (n) { if (found) return; var r = P.XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: '' }); if (r.length > 1 && r[0].some(function (h) { return /alim_nom_fr/i.test(String(h)); })) found = r; });
+        rows = found || P.XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: '' });
+      }
+      var rep = P.ciqualFromRows(rows);
+      GEN = rep.foods;
+      try { localStorage.setItem(GKEY, JSON.stringify(GEN)); S.gmsg = rep.foods.length + ' aliments importés sur ' + rep.rows + ' lignes. Constituants reconnus : ' + rep.recognised.length + ' (' + rep.recognised.join(', ') + ').'; }
+      catch (err) { GEN = []; S.gmsg = 'Espace de stockage du navigateur insuffisant pour cette base.'; }
+    } catch (err) { S.gmsg = 'Import impossible : ' + err.message; }
+    render();
+  };
+  fr.readAsArrayBuffer(file);
+}
+
 /* ---------- Rendu & événements ---------- */
 function render() {
   renderNav();
@@ -336,14 +363,16 @@ function render() {
   if (S.keep) { window.scrollTo(0, y); S.keep = false; }
 }
 function numOrNull(s) { var n = parseFloat(String(s).replace(',', '.')); return isFinite(n) && n >= 0 ? n : null; }
-function findFood(id) { var onl = S.online.find(function (x) { return x.id === id; }); var hist = db.entries.find(function (x) { return x.food.id === id; }); return allFoods().find(function (f) { return f.id === id; }) || onl || (hist ? hist.food : null) || (S.sheet && S.sheet.food.id === id ? S.sheet.food : null); }
+function findFood(id) { var onl = S.online.concat(S.usda).find(function (x) { return x.id === id; }); var hist = db.entries.find(function (x) { return x.food.id === id; }); return allFoods().find(function (f) { return f.id === id; }) || onl || (hist ? hist.food : null) || (S.sheet && S.sheet.food.id === id ? S.sheet.food : null); }
 
 document.addEventListener('input', function (e) {
   if (e.target.id === 'bc') { S.bc = e.target.value; return; }
   if (e.target.id === 'q') { S.q = e.target.value; onlineSearch(); var pos = e.target.selectionStart; S.keep = true; render(); var q = document.getElementById('q'); if (q) { q.focus(); q.setSelectionRange(pos, pos); } }
   if (e.target.closest && e.target.closest('#sheet')) preview();
 });
-document.addEventListener('change', function (e) { if (e.target.closest && e.target.closest('#sheet')) preview(); });
+document.addEventListener('change', function (e) {
+  if (e.target.id === 'usda_key') { db.usdaKey = e.target.value.trim() || 'DEMO_KEY'; save(); return; }
+  if (e.target.id === 'ciq_file' && e.target.files && e.target.files[0]) { importCiqual(e.target.files[0]); return; } if (e.target.closest && e.target.closest('#sheet')) preview(); });
 document.addEventListener('click', function (e) {
   var b = e.target.closest('[data-act]'); if (!b) return;
   var a = b.dataset.act, v = b.dataset.v, id = b.dataset.id;
@@ -389,6 +418,8 @@ document.addEventListener('click', function (e) {
     case 'export': S.backup = JSON.stringify(db); break;
     case 'copy': { var ta = document.getElementById('backup'); ta.select(); try { navigator.clipboard.writeText(ta.value).catch(function () { document.execCommand('copy'); }); } catch (err) { try { document.execCommand('copy'); } catch (e2) {} } return; }
     case 'import': { try { var o = JSON.parse(document.getElementById('backup').value); if (!o || !Array.isArray(o.entries)) throw 0; db = Object.assign({ custom: [], goals: P.DEFAULT_GOALS, primal: P.DEFAULT_PRIMAL_CONFIG }, o); save(); S.backup = ''; } catch (err) { S.answer = 'Sauvegarde invalide.'; } break; }
+    case 'usdatoggle': db.usdaOn = !db.usdaOn; save(); break;
+    case 'ciqdel': GEN = []; try { localStorage.removeItem(GKEY); } catch (err) {} S.gmsg = 'Base CIQUAL retirée.'; break;
     case 'reset1': S.confirmReset = true; break;
     case 'reset0': S.confirmReset = false; break;
     case 'reset2': db = { entries: [], custom: [], goals: JSON.parse(JSON.stringify(P.DEFAULT_GOALS)), profile: null, primal: P.DEFAULT_PRIMAL_CONFIG }; save(); S.confirmReset = false; break;

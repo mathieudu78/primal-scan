@@ -12,3 +12,7 @@ export { fetchByBarcode, searchOff } from '../src/data/off';
 export { isValidGtin, normalizeGtin, barcodeFromQr } from '../src/data/barcode';
 import * as ZXing from '@zxing/library';
 export { ZXing };
+export { ciqualFromRows, csvToRows } from '../src/data/ciqualParse';
+export { searchUsda } from '../src/data/usda';
+import * as XLSX from 'xlsx';
+export { XLSX };
